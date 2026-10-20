@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matriz de capacidad · Terminaciones La Estrella</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f3f5f4; --surface:#ffffff; --ink:#1c2b2a; --muted:#667573;
+    --line:#d5dcda; --accent:#0f5c5a; --accent-ink:#ffffff;
+    --calc:#eef2f1; --flash:#fff1b8; --err:#b3261e; --ok:#2e7d4f;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#121918; --surface:#1a2322; --ink:#e4ecea; --muted:#8fa09d;
+      --line:#2f3d3b; --accent:#5fb8b3; --accent-ink:#0c1514;
+      --calc:#212c2b; --flash:#5a4a10; --err:#f2938d; --ok:#7bd19a;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font-family:"Source Sans 3",system-ui,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 24px;padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+  h1{font-size:1.15rem;font-weight:700;margin:0}
+  .tabs{display:flex;gap:4px}
+  .tabs button{font:inherit;font-weight:600;padding:7px 16px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:6px;cursor:pointer}
+  .tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .tabs button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  #status{margin-left:auto;font-size:.9rem;color:var(--muted)}
+  #status.ok{color:var(--ok)} #status.err{color:var(--err)}
+  main{flex:1;overflow:auto;padding:16px 20px 28px}
+  table{border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--line);border-radius:6px}
+  th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;min-width:96px}
+  th{position:sticky;top:0;z-index:1;background:var(--accent);color:var(--accent-ink);font-size:.82rem;font-weight:600;padding:8px;text-align:left;vertical-align:bottom;max-width:150px}
+  td.wide,th.wide{min-width:230px}
+  td input{width:100%;border:0;background:transparent;color:var(--ink);font:inherit;font-size:.92rem;padding:8px;font-variant-numeric:tabular-nums}
+  td input:read-only{background:var(--calc);color:var(--muted)}
+  td.flash input{background:var(--flash)}
+  td.error input{box-shadow:inset 0 0 0 2px var(--err)}
+  @media (prefers-reduced-motion:no-preference){td input{transition:background .6s}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Matriz de capacidad</h1>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div id="status" role="status">Conectando…</div>
+</header>
+<main><table id="grid"></table></main>
+
+<script>
+// ====== CONFIGURACIÓN ======
+const API_URL = 'https://script.google.com/macros/s/AKfycbyZLLJZXdv2YlmeBJLQ8-Z1W4xQ75FC7rI4TzoJxuC2V7YP8Grvl-HOPc4CwerTXjZ2Ow/exec';
+const TOKEN   = 'LAGENCIA';                        // igual a la de Code.gs
+const SHEETS  = ['Matriz General', 'Matriz 2'];
+const POLL_MS = 5000;
+// ===========================
+
+let current = SHEETS[0];
+let dims = '';
+const dirty = new Set();
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+
+function setStatus(text, cls){ statusEl.textContent = text; statusEl.className = cls || ''; }
+
+// Pestañas
+const tabs = document.getElementById('tabs');
+SHEETS.forEach(name => {
+  const b = document.createElement('button');
+  b.textContent = name; b.setAttribute('role','tab');
+  b.onclick = () => { current = name; dims = ''; grid.innerHTML = ''; refreshTabs(); load(); };
+  tabs.appendChild(b);
+});
+function refreshTabs(){ [...tabs.children].forEach((b,i)=>b.setAttribute('aria-selected', SHEETS[i]===current)); }
+refreshTabs();
+
+// Lectura
+async function load(){
+  const hoja = current;
+  try{
+    const url = `${API_URL}?sheet=${encodeURIComponent(hoja)}&token=${encodeURIComponent(TOKEN)}`;
+    const d = await (await fetch(url)).json();
+    if(!d.ok) throw new Error(d.error);
+    if(hoja !== current) return; // el usuario cambió de pestaña
+    render(d);
+    setStatus('Sincronizado ' + new Date().toLocaleTimeString('es-CO'), 'ok');
+  }catch(e){ setStatus('Sin conexión: ' + e.message, 'err'); }
+}
+
+function render(d){
+  const key = d.display.length + 'x' + (d.display[0] || []).length;
+  if(key !== dims){ dims = key; build(d); }
+  d.display.forEach((fila, r) => fila.forEach((val, c) => {
+    if(r === 0){ return; }
+    const inp = grid.rows[r].cells[c].firstChild;
+    inp.readOnly = d.formulas[r][c];
+    const k = r + '_' + c;
+    if(dirty.has(k) || document.activeElement === inp || inp.value === val) return;
+    inp.value = val;
+    const td = inp.parentNode; td.classList.add('flash');
+    setTimeout(() => td.classList.remove('flash'), 1500);
+  }));
+  d.display[0].forEach((val, c) => { grid.rows[0].cells[c].textContent = val; });
+}
+
+function build(d){
+  grid.innerHTML = '';
+  d.display.forEach((fila, r) => {
+    const tr = grid.insertRow();
+    fila.forEach((val, c) => {
+      const wide = c <= 2;
+      if(r === 0){
+        const th = document.createElement('th');
+        th.textContent = val; if(wide) th.className = 'wide';
+        tr.appendChild(th);
+      } else {
+        const td = tr.insertCell(); if(wide) td.className = 'wide';
+        const inp = document.createElement('input');
+        inp.value = val; inp.title = val;
+        inp.dataset.r = r; inp.dataset.c = c;
+        inp.addEventListener('change', () => save(inp, td));
+        td.appendChild(inp);
+      }
+    });
+  });
+}
+
+// Escritura
+async function save(inp, td){
+  const k = inp.dataset.r + '_' + inp.dataset.c;
+  dirty.add(k); td.classList.remove('error'); setStatus('Guardando…');
+  try{
+    const r = await fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token:TOKEN, sheet:current, row:+inp.dataset.r+1, col:+inp.dataset.c+1, value:inp.value })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error);
+    inp.value = d.display; dirty.delete(k);
+    setStatus('Guardado', 'ok');
+    load(); // refresca las fórmulas recalculadas
+  }catch(e){
+    td.classList.add('error'); setStatus('No se guardó: ' + e.message, 'err');
+  }
+}
+
+load();
+setInterval(() => { if(!document.hidden) load(); }, POLL_MS);
+</script>
+</body>
+</html>
